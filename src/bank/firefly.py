@@ -1,4 +1,4 @@
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import typing as ty
 import requests
 import logging
@@ -20,7 +20,6 @@ def _merge_dicts(prev: ty.Dict, new: ty.Dict) -> ty.Dict:
 
 @dataclass
 class FireflyAPIDataClass:
-
     """Base class for all Firefly API data classes.
 
     This base class provides methods to translate any implemented Firefly
@@ -140,7 +139,9 @@ class FireflyAPIDataClass:
                 logger.info(f"Ignoring non-implemented attribute '{api_attribute}'.")
                 continue
             annotation = type_.__annotations__[attr_attribute]
-            if datetime in ty.get_args(annotation) and value is not None:
+            if (
+                datetime is annotation or datetime in ty.get_args(annotation)
+            ) and value is not None:
                 value = DATETIME_PARSER(value)
             init_dict[attr_attribute] = value
         return type_(**init_dict)
@@ -477,6 +478,19 @@ class FireflyClient:
             for transaction in transactions_dict["attributes"]["transactions"]:
                 yield transaction["transaction_journal_id"], transaction
 
+    def iterate_over_account_transactions(
+        self,
+        account: FireflyAccount,
+        params: ty.Optional[ty.Dict] = None,
+    ) -> ty.Iterable[ty.Tuple[int, ty.Dict]]:
+        if params is None:
+            params = dict()
+        for transactions_dict in self._iterate_over(
+            f"accounts/{account.instance_id}/transactions", params=params
+        ):
+            for transaction in transactions_dict["attributes"]["transactions"]:
+                yield transaction["transaction_journal_id"], transaction
+
     def get_account(self, account_name: str) -> FireflyAccount:
         account: ty.List[ty.Tuple[int, ty.Dict[str, ty.Any]]] = [
             (id_, account)
@@ -499,7 +513,7 @@ class FireflyClient:
         ]
         return accounts
 
-    def create_account(self, account: FireflyAccount) -> None:
+    def create_account(self, account: FireflyAccount) -> FireflyAccount:
         response = self.api.post(endpoint="accounts", payload=account.to_dict())
 
         if "errors" in response:
@@ -512,16 +526,24 @@ class FireflyClient:
         logger.info(
             f" => Account {account} added with id {data['id']} at {data['attributes']['created_at']}"
         )
+        return FireflyAPIDataClass.from_json(
+            FireflyAccount, data["attributes"], data["id"]
+        )
 
-    def create_account_if_not_present(self, account: FireflyAccount) -> None:
+    def create_account_if_not_present(self, account: FireflyAccount) -> FireflyAccount:
         account_name = account.name
         potential_accounts = [
-            account
-            for _, account in self.iterate_over_accounts()
+            (account_id, account)
+            for account_id, account in self.iterate_over_accounts()
             if account["name"] == account_name
         ]
         if not potential_accounts:
-            self.create_account(account)
+            account = self.create_account(account)
+        else:
+            account = FireflyAPIDataClass.from_json(
+                FireflyAccount, potential_accounts[0][1], potential_accounts[0][0]
+            )
+        return account
 
     def delete_all_accounts(self) -> None:
         for account in self._iterate_over("accounts"):
@@ -558,30 +580,18 @@ class FireflyClient:
             f" => Transaction {transaction} added with id {data['id']} at {data['attributes']['created_at']}"
         )
 
-    def insert_or_update_transaction(self, transaction: FireflyTransaction):
-        tr_date: date = transaction.date
-        incr = timedelta(days=1)
-        for (
-            potential_transaction_id,
-            potential_transaction_dict,
-        ) in self.iterate_over_transactions(
-            params={
-                "type": transaction.transaction_type,
-                "start": (tr_date - incr).isoformat(),
-                "end": (tr_date + incr).isoformat(),
-            },
-        ):
-            potential_transaction: FireflyTransaction = FireflyAPIDataClass.from_json(
-                FireflyTransaction, potential_transaction_dict, potential_transaction_id
-            )
-            if transaction.is_equivalent(potential_transaction):
-                potential_transaction.update_with(transaction)
-                print(f"Updating transaction {potential_transaction} ...")
-                self.api.put(
-                    f"transactions/{potential_transaction.instance_id}",
-                    {"transactions": [potential_transaction.to_dict()]},
+    def last_transaction_date(self, account: FireflyAccount) -> datetime:
+        long_before = (
+            datetime.now(tz=timezone(timedelta(hours=1))) - timedelta(weeks=52 * 100)
+        ).replace(minute=0, second=0, microsecond=0)
+        return max(
+            (
+                FireflyAPIDataClass.from_json(
+                    FireflyTransaction, transaction_id, transaction
+                ).date
+                for transaction, transaction_id in self.iterate_over_account_transactions(
+                    account
                 )
-                break
-        # If no break fired in the for loop, i.e. no transaction updated.
-        else:
-            self.insert_transaction(transaction)
+            ),
+            default=long_before,
+        )

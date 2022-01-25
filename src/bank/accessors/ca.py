@@ -17,6 +17,7 @@ from bank.rules import (
     update_information_keys_to_firefly_inplace,
     InformationContainer,
 )
+from bank._utils import RunningOperation
 
 logger = logging.getLogger("bank.accessors.ca")
 
@@ -147,8 +148,12 @@ def _ca_operation_to_firefly_transaction(
     information: InformationContainer = InformationContainer(
         {
             "instance_id": None,
-            "date": datetime.strptime(opjs["dateOperation"], _CA_DATE_FORMAT),
-            "value_date": datetime.strptime(opjs["dateValeur"], _CA_DATE_FORMAT),
+            "date": datetime.strptime(
+                opjs["dateOperation"] + "+0100", _CA_DATE_FORMAT + "%z"
+            ),
+            "value_date": datetime.strptime(
+                opjs["dateValeur"] + "+0100", _CA_DATE_FORMAT + "%z"
+            ),
             "amount": opjs["montant"],
             "description": opjs["libelleOperation"].strip(),
             "notes": opjs["libelleComplementaire"].strip(),
@@ -178,9 +183,11 @@ def _ca_operation_to_firefly_transaction(
         message = "{0:<40} {1:<32} {2:<6}".format(
             ",".join(missing_keys), opjs["libelleOperation"], opjs["montant"]
         )
-        logger.warning(message)
+        # logger.warning(message)
 
-    information["tags"] = [t.strip() for t in information["tags"].split(",")]
+    information["tags"] = [
+        t.strip() for t in information["tags"].split(",") if t.strip()
+    ]
     update_information_keys_to_firefly_inplace(information)
 
     return FireflyTransaction(**information)
@@ -373,7 +380,10 @@ def _ca_account_to_firefly_account(account: Account) -> FireflyAccount:
         bic=iban.iban["ibanData"]["ibanData"]["bicCode"],
         account_number=account_dict["numeroCompte"],
         opening_balance=opening_balance,
-        opening_balance_date=opening_balance_date,
+        # Offseting the creation date by 1 day to avoid issues with
+        # transactions being added at exactly the same time the account is
+        # created.
+        opening_balance_date=opening_balance_date - timedelta(days=1),
         currency_code=account_dict["idDevise"],
         account_role=_get_account_role(account_dict),
     )
@@ -416,12 +426,12 @@ def find_matching_transaction(
     elif len(potential_transactions) == 1:
         return potential_transactions[0]
     else:
-        message = f"{len(potential_transactions)} transactions might match! Picking the first one.\n"
-        message += f"Transaction under consideration: {transaction}.\n"
-        message += "Found potentially matching transactions:\n\t- "
-        message += "\n\t- ".join(str(t) for t in potential_transactions)
+        # message = f"{len(potential_transactions)} transactions might match! Picking the first one.\n"
+        # message += f"Transaction under consideration: {transaction}.\n"
+        # message += "Found potentially matching transactions:\n\t- "
+        # message += "\n\t- ".join(str(t) for t in potential_transactions)
 
-        logger.warning(message)
+        # logger.warning(message)
         return potential_transactions[0]
 
 
@@ -483,24 +493,49 @@ def initialise_firefly_accounts(
     firefly_token: str,
     rules_path: Path,
 ) -> None:
-    auth = get_authenticator(username, password, region)
-    client = FireflyClient(firefly_url, firefly_token)
+    with RunningOperation("Connecting to the different web services"):
+        auth = get_authenticator(username, password, region)
+        client = FireflyClient(firefly_url, firefly_token)
 
     transactions: ty.Dict[FireflyAccount, ty.List[FireflyTransaction]] = dict()
 
-    for ca_account in get_ca_accounts(auth):
-        firefly_account = _ca_account_to_firefly_account(ca_account)
-        transactions[firefly_account] = list()
-        for firefly_transaction in get_transactions(ca_account, rules_file=rules_path):
-            if firefly_transaction.transaction_type == "withdrawal":
-                firefly_transaction.amount = -firefly_transaction.amount
-            transactions[firefly_account].append(firefly_transaction)
+    with RunningOperation("Recovering data from Crédit Agricole"):
+        for ca_account in get_ca_accounts(auth):
+            firefly_account = _ca_account_to_firefly_account(ca_account)
+            transactions[firefly_account] = list()
+            for firefly_transaction in get_transactions(
+                ca_account, rules_file=rules_path
+            ):
+                if firefly_transaction.transaction_type == "withdrawal":
+                    firefly_transaction.amount = -firefly_transaction.amount
+                transactions[firefly_account].append(firefly_transaction)
 
     # Find transfers
-    find_and_replace_by_transfers(transactions)
+    with RunningOperation("Finding transfers"):
+        find_and_replace_by_transfers(transactions)
 
-    for acc in transactions:
-        client.create_account_if_not_present(acc)
-    for transs in transactions.values():
-        for trans in transs:
-            client.insert_or_update_transaction(trans)
+    with RunningOperation(
+        "Creating non-existant accounts on Firefly III"
+    ) as running_op:
+        new_transactions = dict()
+        for account, transaction_list in transactions.items():
+            if account.instance_id is None:
+                running_op.print(f"Creating account if not present '{account.name}'")
+            account = client.create_account_if_not_present(account)
+            new_transactions[account] = transaction_list
+        transactions = new_transactions
+
+    with RunningOperation("Updating Firefly-III database"):
+        for account, transaction_list in transactions.items():
+            with RunningOperation(f"Updating account '{account.name}'") as rop:
+                last_registered_transaction_date = client.last_transaction_date(account)
+                rop.print(
+                    f"Account was last updated the '{last_registered_transaction_date}'"
+                )
+                # We reverse the transaction list to start by the oldest transaction.
+                for transaction in reversed(transaction_list):
+                    if transaction.date > last_registered_transaction_date:
+                        rop.print(
+                            f"Inserting '{transaction.description:<32}' of {transaction.amount:>8.2f}€ done the {transaction.date.date()}"
+                        )
+                        client.insert_transaction(transaction)
