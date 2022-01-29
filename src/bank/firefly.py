@@ -53,6 +53,12 @@ class FireflyAPIDataClass:
         ty.Callable[[str], datetime]
     ] = lambda s: datetime.fromisoformat(s)
 
+    __TYPE_PARSERS: ty.ClassVar[ty.Mapping[ty.Type[T], ty.Callable[[str], T]]] = {
+        int: lambda i: int(i),
+        float: lambda f: float(f),
+        datetime: _DATETIME_PARSE,
+    }
+
     instance_id: ty.Optional[int]
 
     @staticmethod
@@ -139,10 +145,12 @@ class FireflyAPIDataClass:
                 logger.info(f"Ignoring non-implemented attribute '{api_attribute}'.")
                 continue
             annotation = type_.__annotations__[attr_attribute]
-            if (
-                datetime is annotation or datetime in ty.get_args(annotation)
-            ) and value is not None:
-                value = DATETIME_PARSER(value)
+            for potential_type, parser in FireflyAPIDataClass.__TYPE_PARSERS.items():
+                if (
+                    potential_type is annotation
+                    or potential_type in ty.get_args(annotation)
+                ) and value is not None:
+                    value = parser(value)
             init_dict[attr_attribute] = value
         return type_(**init_dict)
 
