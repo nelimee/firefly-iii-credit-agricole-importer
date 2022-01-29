@@ -5,7 +5,7 @@ JSON-like dictionnary obtained from the banking institution and return a
 JSON-like structure that contains the inferred information according to a 
 set of rules.
 
-Rules are written in a INI file as can be parser with Python's configparser 
+Rules are written in a INI file as can be parsed with Python's configparser 
 module.
 Each section in the INI file is considered to be a rule and each rule can
 contain some keys:
@@ -44,6 +44,12 @@ contain some keys:
 - 'notes' is an optional string-valued key that describes further the 
   transaction. In theory this is already set beforehand, but the pre-computed 
   value will be overriden if this key is used in a matching rule.
+
+Notes:
+  If multiple rules match and set the same key, the last matching rule will 
+  overwrite the content set by the previous ones.
+  The only exception to this is the "tags" attribute that is appended to the 
+  already existing list of tags for each matching rules.
 """
 
 import configparser
@@ -210,7 +216,14 @@ class Rule:
         """Apply the rule and modify in place the provided information."""
         if self._condition.matches(information):
             for key, value in self._information.items():
-                information[key] = Rule._replace_value(value, information)
+                if key == "tags" and key in information:
+                    # Append tags instead of replacing the value
+                    if information[key]:
+                        # If the tags are not empty, add a delimiter.
+                        information[key] += ","
+                    information[key] += Rule._replace_value(value, information)
+                else:
+                    information[key] = Rule._replace_value(value, information)
 
 
 class Rules:
