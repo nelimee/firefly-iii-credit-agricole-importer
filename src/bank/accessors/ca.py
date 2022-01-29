@@ -539,3 +539,20 @@ def initialise_or_update_firefly_accounts(
                             f"Inserting '{transaction.description:<32}' of {transaction.amount:>8.2f}€ done the {transaction.date.date()}"
                         )
                         client.insert_transaction(transaction)
+
+
+def list_firefly_transactions(
+    firefly_url: str,
+    firefly_token: str,
+    filters: ty.List[ty.Callable[[FireflyTransaction], bool]],
+) -> None:
+    with RunningOperation("Connecting to the Firefly III web services"):
+        client = FireflyClient(firefly_url, firefly_token)
+
+    with RunningOperation(
+        "Listing matching transactions from Firefly III"
+    ) as running_op:
+        for (id_, dict_) in client.iterate_over_transactions():
+            transaction = FireflyAPIDataClass.from_json(FireflyTransaction, dict_, id_)
+            if all(f(transaction) for f in filters):
+                running_op.print(transaction.summary_str())

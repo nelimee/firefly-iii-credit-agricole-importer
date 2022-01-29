@@ -314,6 +314,16 @@ class FireflyTransaction(FireflyAPIDataClass):
     def __repr__(self) -> str:
         return self._get_representation()
 
+    def summary_str(self) -> str:
+        amount = self.amount
+        if self.transaction_type == "withdrawal":
+            amount = -amount
+        date = str(self.date.date())
+        description = self.description.strip()
+        category = self.category_name or "NO_CATEGORY"
+        tags = ",".join(self.tags) or "NO_TAG"
+        return f"{date:<10} {description:<32} {amount:>8.2f}€ {self.source_name:>33} => {self.destination_name:<33} {category:>20} {tags:>30}"
+
 
 @dataclass
 class FireflyAccount(FireflyAPIDataClass):
