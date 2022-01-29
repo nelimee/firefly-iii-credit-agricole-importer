@@ -329,16 +329,20 @@ class FireflyTransaction(FireflyAPIDataClass):
             self.budget_id = api.get_budget(self.budget_name)["id"]
 
     def is_equivalent(self, other: "FireflyTransaction") -> bool:
-        return all(
-            getattr(self, attr) == getattr(other, attr)
-            for attr in [
-                "transaction_type",
-                "date",
-                "value_date",
-                "amount",
-                "sepa_mandate_identifier",
-                "sepa_creditor_identifier",
-            ]
+        return (
+            all(
+                getattr(self, attr) == getattr(other, attr)
+                for attr in [
+                    "transaction_type",
+                    "date",
+                    "value_date",
+                    "amount",
+                    "sepa_mandate_identifier",
+                    "sepa_creditor_identifier",
+                    "category_name",
+                ]
+            )
+            and all(st == ot for st, ot in zip(set(self.tags), set(other.tags)))
         )
 
     def update_with(self, other: "FireflyTransaction") -> None:
