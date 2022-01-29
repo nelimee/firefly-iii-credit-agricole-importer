@@ -485,7 +485,7 @@ def find_and_replace_by_transfers(
                     ].remove(matching_transaction)
 
 
-def initialise_firefly_accounts(
+def initialise_or_update_firefly_accounts(
     username: str,
     password: str,
     region: str,

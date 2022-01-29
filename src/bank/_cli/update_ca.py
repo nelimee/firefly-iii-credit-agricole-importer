@@ -3,7 +3,7 @@ import argparse
 import os
 import typing as ty
 
-from bank.accessors.ca import initialise_firefly_accounts
+from bank.accessors.ca import initialise_or_update_firefly_accounts
 from bank._paths import CA_RULES
 
 
@@ -34,7 +34,7 @@ def main():
     ca_account_number: str = input("Enter your Crédit Agricole account number: ")
     ca_account_password: str = input("Enter your Crédit Agricole password: ")
 
-    initialise_firefly_accounts(
+    initialise_or_update_firefly_accounts(
         ca_account_number,
         ca_account_password,
         args.credit_agricole_region,
