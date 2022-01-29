@@ -3,7 +3,7 @@ import argparse
 import os
 import typing as ty
 
-from bank.accessors.ca import list_firefly_transactions
+from bank.firefly import list_firefly_transactions
 
 
 def main():

@@ -3,7 +3,7 @@ import argparse
 import os
 import typing as ty
 
-from bank.accessors.ca import update_firefly_transactions
+from bank.firefly import update_firefly_transactions
 from bank._paths import CA_RULES
 
 

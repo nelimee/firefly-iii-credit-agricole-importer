@@ -1,15 +1,17 @@
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 import typing as ty
 import requests
 import logging
 from dataclasses import dataclass, field
 from copy import deepcopy
+from pathlib import Path
 
 from bank.rules import (
     Rules,
     InformationContainer,
     update_information_keys_to_firefly_inplace,
 )
+from bank._utils import RunningOperation
 
 logger = logging.getLogger("bank.firefly")
 
@@ -656,3 +658,44 @@ def update_transaction_with_rules(
     ]
     update_information_keys_to_firefly_inplace(information)
     return FireflyTransaction(**information)
+
+
+def update_firefly_transactions(
+    firefly_url: str,
+    firefly_token: str,
+    rules_path: Path,
+) -> None:
+    with RunningOperation("Connecting to the different web services"):
+        client = FireflyClient(firefly_url, firefly_token)
+
+    rules = Rules(rules_path)
+
+    with RunningOperation("Updating transactions on Firefly III") as running_op:
+        for (id_, dict_) in client.iterate_over_transactions():
+            old_transaction = FireflyAPIDataClass.from_json(
+                FireflyTransaction, dict_, id_
+            )
+            if old_transaction.transaction_type == "withdrawal":
+                old_transaction.amount = -old_transaction.amount
+            new_transaction = update_transaction_with_rules(old_transaction, rules)
+            if not new_transaction.is_equivalent(old_transaction):
+                running_op.print(f"Updating     {new_transaction.description}")
+            else:
+                running_op.print(f"No change in {new_transaction.description}")
+
+
+def list_firefly_transactions(
+    firefly_url: str,
+    firefly_token: str,
+    filters: ty.List[ty.Callable[[FireflyTransaction], bool]],
+) -> None:
+    with RunningOperation("Connecting to the Firefly III web services"):
+        client = FireflyClient(firefly_url, firefly_token)
+
+    with RunningOperation(
+        "Listing matching transactions from Firefly III"
+    ) as running_op:
+        for (id_, dict_) in client.iterate_over_transactions():
+            transaction = FireflyAPIDataClass.from_json(FireflyTransaction, dict_, id_)
+            if all(f(transaction) for f in filters):
+                running_op.print(transaction.summary_str())
