@@ -3,11 +3,15 @@ import argparse
 import os
 import typing as ty
 
+import colorama
+
 from bank.firefly import update_firefly_transactions
 from bank._paths import CA_RULES
 
 
 def main():
+    colorama.init()
+
     parser = argparse.ArgumentParser("Update all transactions on the Firefly account.")
 
     parser.add_argument(
@@ -28,6 +32,7 @@ def main():
         token = input("Enter your Firefly III token:\n")
 
     update_firefly_transactions(args.firefly_instance, token, args.rules)
+    colorama.deinit()
 
 
 if __name__ == "__main__":

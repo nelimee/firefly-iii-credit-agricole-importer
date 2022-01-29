@@ -5,6 +5,9 @@ import logging
 from dataclasses import dataclass, field
 from copy import deepcopy
 from pathlib import Path
+import re
+
+import colorama
 
 from bank.rules import (
     Rules,
@@ -16,6 +19,7 @@ from bank._utils import RunningOperation
 logger = logging.getLogger("bank.firefly")
 
 JSON = ty.Dict
+ANSI_regex = re.compile("\x1b\\[(K|.*?m)")
 
 T = ty.TypeVar("T")
 
@@ -174,6 +178,30 @@ class FireflyAPIDataClass:
         return type(self).__name__ + "(" + ", ".join(attributes_repr) + ")"
 
 
+def _ansilen(string: str) -> int:
+    return len(ANSI_regex.sub("", string))
+
+
+def _lfill(string: str, fill: int) -> str:
+    diff = _ansilen(string) - fill
+    if diff < 0:
+        string = " " * (-diff) + string
+    elif diff > 0:
+        raise NotImplementedError()
+        # string = string[:fill]
+    return string
+
+
+def _rfill(string: str, fill: int) -> str:
+    diff = _ansilen(string) - fill
+    if diff < 0:
+        string = string + " " * (-diff)
+    elif diff > 0:
+        raise NotImplementedError()
+        # string = string[:fill]
+    return string
+
+
 @dataclass
 class FireflyTransaction(FireflyAPIDataClass):
     """A Firefly transaction.
@@ -322,15 +350,115 @@ class FireflyTransaction(FireflyAPIDataClass):
     def __repr__(self) -> str:
         return self._get_representation()
 
+    @staticmethod
+    def summary_format(
+        transaction_type,
+        date,
+        description,
+        amount,
+        source_name,
+        destination_name,
+        category,
+        tags,
+    ):
+        """Format the summary string correctly.
+
+        This function was needed due to the potential presence of ANSI escape
+        sequences in the strings that were making the output of string.format
+        badly aligned.
+        """
+        return " ".join(
+            [
+                _rfill(transaction_type, 10),
+                _rfill(date, 10),
+                _rfill(description, 32),
+                _lfill(amount, 8) + "€",
+                _lfill(source_name, 32),
+                "=>",
+                _rfill(destination_name, 32),
+                _lfill(category, 20),
+                _lfill(tags, 30),
+            ]
+        )
+
+    @staticmethod
+    def summary_str_header() -> str:
+        return FireflyTransaction.summary_format(
+            transaction_type="type",
+            date="date",
+            description="description",
+            amount="amount",
+            source_name="source",
+            destination_name="destination",
+            category="category",
+            tags="tags",
+        )
+
     def summary_str(self) -> str:
         amount = self.amount
         if self.transaction_type == "withdrawal":
             amount = -amount
-        date = str(self.date.date())
-        description = self.description.strip()
         category = self.category_name or "NO_CATEGORY"
         tags = ",".join(self.tags) or "NO_TAG"
-        return f"{date:<10} {description:<32} {amount:>8.2f}€ {self.source_name:>33} => {self.destination_name:<33} {category:>20} {tags:>30}"
+        return FireflyTransaction.summary_format(
+            transaction_type=self.transaction_type,
+            date=str(self.date.date()),
+            description=self.description.strip(),
+            amount=f"{amount:.2f}",
+            source_name=self.source_name,
+            destination_name=self.destination_name,
+            category=category,
+            tags=tags,
+        )
+
+    @staticmethod
+    def summary_diff_lines(
+        old_transaction: "FireflyTransaction", new_transaction: "FireflyTransaction"
+    ) -> ty.Tuple[str, str]:
+        data = [
+            [
+                t.transaction_type,
+                str(t.date.date()),
+                t.description.strip(),
+                (
+                    f"{-t.amount:.2f}"
+                    if t.transaction_type == "withdrawal"
+                    else f"{t.amount:.2f}"
+                ),
+                t.source_name,
+                t.destination_name,
+                t.category_name or "NO_CATEGORY",
+                ",".join(t.tags) or "NO_TAGS",
+            ]
+            for t in [old_transaction, new_transaction]
+        ]
+
+        for i in range(len(data[0])):
+            if data[0][i] != data[1][i]:
+                data[0][i] = colorama.Fore.RED + data[0][i] + colorama.Style.RESET_ALL
+                data[1][i] = colorama.Fore.GREEN + data[1][i] + colorama.Style.RESET_ALL
+        return (
+            FireflyTransaction.summary_format(
+                transaction_type=data[0][0],
+                date=data[0][1],
+                description=data[0][2],
+                amount=data[0][3],
+                source_name=data[0][4],
+                destination_name=data[0][5],
+                category=data[0][6],
+                tags=data[0][7],
+            ),
+            FireflyTransaction.summary_format(
+                transaction_type=data[1][0],
+                date=data[1][1],
+                description=data[1][2],
+                amount=data[1][3],
+                source_name=data[1][4],
+                destination_name=data[1][5],
+                category=data[1][6],
+                tags=data[1][7],
+            ),
+        )
 
 
 @dataclass
@@ -679,9 +807,12 @@ def update_firefly_transactions(
                 old_transaction.amount = -old_transaction.amount
             new_transaction = update_transaction_with_rules(old_transaction, rules)
             if not new_transaction.is_equivalent(old_transaction):
-                running_op.print(f"Updating     {new_transaction.description}")
-            else:
-                running_op.print(f"No change in {new_transaction.description}")
+                diff_lines = FireflyTransaction.summary_diff_lines(
+                    old_transaction, new_transaction
+                )
+                running_op.print(diff_lines[0])
+                running_op.print(diff_lines[1])
+                running_op.print("")
 
 
 def list_firefly_transactions(
@@ -695,6 +826,7 @@ def list_firefly_transactions(
     with RunningOperation(
         "Listing matching transactions from Firefly III"
     ) as running_op:
+        running_op.print(FireflyTransaction.summary_str_header())
         for (id_, dict_) in client.iterate_over_transactions():
             transaction = FireflyAPIDataClass.from_json(FireflyTransaction, dict_, id_)
             if all(f(transaction) for f in filters):
