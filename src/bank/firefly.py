@@ -5,6 +5,12 @@ import logging
 from dataclasses import dataclass, field
 from copy import deepcopy
 
+from bank.rules import (
+    Rules,
+    InformationContainer,
+    update_information_keys_to_firefly_inplace,
+)
+
 logger = logging.getLogger("bank.firefly")
 
 JSON = ty.Dict
@@ -613,3 +619,40 @@ class FireflyClient:
             ),
             default=long_before,
         )
+
+
+def update_transaction_with_rules(
+    transaction: FireflyTransaction, rules: Rules
+) -> FireflyTransaction:
+    """Update the given transaction with the given rules."""
+
+    if transaction.transaction_type not in ["deposit", "withdrawal"]:
+        return transaction
+
+    information: InformationContainer = InformationContainer(
+        {
+            "instance_id": transaction.instance_id,
+            "date": transaction.date,
+            "value_date": transaction.value_date,
+            "amount": transaction.amount,
+            "description": transaction.description,
+            "notes": transaction.notes,
+            "sepa_mandate_identifier": transaction.sepa_mandate_identifier,
+            "sepa_creditor_identifier": transaction.sepa_creditor_identifier,
+            "tags": ",".join(transaction.tags),
+        },
+        {
+            "operation_type": transaction.transaction_type,
+            "linked_account": (
+                transaction.destination_name
+                if transaction.transaction_type == "deposit"
+                else transaction.source_name
+            ),
+        },
+    )
+    information = rules.apply_rules(information)
+    information["tags"] = [
+        t.strip() for t in information["tags"].split(",") if t.strip()
+    ]
+    update_information_keys_to_firefly_inplace(information)
+    return FireflyTransaction(**information)

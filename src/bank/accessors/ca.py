@@ -10,7 +10,13 @@ from creditagricole_particuliers.accounts import Account
 from creditagricole_particuliers.operations import Operation
 from creditagricole_particuliers.iban import Iban
 
-from bank.firefly import FireflyClient, FireflyTransaction, FireflyAccount
+from bank.firefly import (
+    FireflyAPIDataClass,
+    FireflyClient,
+    FireflyTransaction,
+    FireflyAccount,
+    update_transaction_with_rules,
+)
 from bank.rules import (
     Rules,
     extract_information_credit_agricole,
@@ -539,6 +545,30 @@ def initialise_or_update_firefly_accounts(
                             f"Inserting '{transaction.description:<32}' of {transaction.amount:>8.2f}€ done the {transaction.date.date()}"
                         )
                         client.insert_transaction(transaction)
+
+
+def update_firefly_transactions(
+    firefly_url: str,
+    firefly_token: str,
+    rules_path: Path,
+) -> None:
+    with RunningOperation("Connecting to the different web services"):
+        client = FireflyClient(firefly_url, firefly_token)
+
+    rules = Rules(rules_path)
+
+    with RunningOperation("Updating transactions on Firefly III") as running_op:
+        for (id_, dict_) in client.iterate_over_transactions():
+            old_transaction = FireflyAPIDataClass.from_json(
+                FireflyTransaction, dict_, id_
+            )
+            if old_transaction.transaction_type == "withdrawal":
+                old_transaction.amount = -old_transaction.amount
+            new_transaction = update_transaction_with_rules(old_transaction, rules)
+            if not new_transaction.is_equivalent(old_transaction):
+                running_op.print(f"Updating     {new_transaction.description}")
+            else:
+                running_op.print(f"No change in {new_transaction.description}")
 
 
 def list_firefly_transactions(
