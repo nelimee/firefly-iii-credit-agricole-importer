@@ -24,6 +24,13 @@ def main():
         action="store_true",
         help="Only list transactions that do not have any category.",
     )
+    parser.add_argument(
+        "--include-transfers",
+        action="store_false",
+        default=False,
+        help="Also include transfers in the list of transactions.",
+    )
+
     args = parser.parse_args()
 
     token: ty.Optional[str] = os.environ.get("FIREFLY_TOKEN")
@@ -35,6 +42,8 @@ def main():
         filters.append(lambda t: not t.tags)
     if args.no_category:
         filters.append(lambda t: not t.category_name)
+    if not args.include_transfers:
+        filters.append(lambda t: t.transaction_type != "transfer")
     list_firefly_transactions(args.firefly_instance, token, filters)
 
 
