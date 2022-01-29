@@ -119,3 +119,5 @@ optional arguments:
 ```
 
 # Rules
+
+See the [`files/rules-example.ini`](files/rules-example.ini) file for a commented example of rule file. 
