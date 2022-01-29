@@ -21,9 +21,30 @@ python -m pip install -e firefly-iii-credit-agricole-importer
 
 # How to use
 
-Once the package has been correctly installed, you should have access to an executable named `firefly_update_ca`.
+## Initialise the accounts on Firefly
 
-```bash
+Once the package has been correctly installed, you should have access to an executable named `firefly_update_ca`.
+This script will approximately do the following:
+
+1. Recover all the Crédit Agricole accounts accessible from the login you provided.
+2. For each recovered Crédit Agricole account:
+   1. If the account cannot be found on the Firefly Instance:
+      1. Get all the transactions of the account from Crédit Agricole API ("all" has been translated to "all the transactions in the previous 100 years" in code, which should be a nice start).
+      2. Get the current balance of your account.
+      3. Compute the balance your account had before the very first transaction recovered.
+      4. Initialise the corresponding Firefly account with the computed balance.
+      5. Insert all the transactions.
+      
+   2. Else:
+      1. Get the newest transaction on this account from Firefly.
+      2. Get all the transactions from Crédit Agricole that have been performed after the transaction recovered in 1.
+      3. Insert all the newest transactions found.
+
+When getting transactions from the Crédit Agricole API, every transaction will go through the rules to populate its metadata (type, source account, destination account, category, tags, ...). See the section about [rules](#rules) for more information.
+
+Here is the command line help:
+
+```
 $ firefly_update_ca --help
 usage: Update Firefly instance with the given account [-h] [-r RULES] firefly_instance credit_agricole_region
 
@@ -42,7 +63,7 @@ You can store the token to connect to your Firefly III instance in the environme
 
 Here is one typical execution obtained on my personnal computer:
 
-```bash
+```
 $ firefly_update_ca https://firefly.url pyrenees-gascogne
 Enter your Crédit Agricole account number: 12345678910
 Enter your Crédit Agricole password: 123456
@@ -58,3 +79,24 @@ Enter your Crédit Agricole password: 123456
     [ 0.39s] Updating account 'Livret A'
 [25.27s] Updating Firefly-III database
 ```
+
+## List the transactions on your Firefly account
+
+Once the package has been correctly installed, you should have access to an executable named `firefly_list_transactions`.
+This script lists all the transactions on the given Firefly instance that match the given filters. It can help viewing the transactions that have not been categorised or tagged yet in order to improve the rules.
+
+```
+$ firefly_list_transactions --help
+usage: List all the transactions that match a given filter.
+       [-h] [--no-tag] [--no-category] firefly_instance
+
+positional arguments:
+  firefly_instance  URL of the Firefly III instance to update.
+
+optional arguments:
+  -h, --help        show this help message and exit
+  --no-tag          Only list transactions that do not have any tag.
+  --no-category     Only list transactions that do not have any category.
+```
+
+# Rules
