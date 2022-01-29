@@ -766,6 +766,8 @@ def update_transaction_with_rules(
     information: InformationContainer = InformationContainer(
         {
             "instance_id": transaction.instance_id,
+            "source": transaction.source_name,
+            "destination": transaction.destination_name,
             "date": transaction.date,
             "value_date": transaction.value_date,
             "amount": transaction.amount,
