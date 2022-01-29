@@ -423,7 +423,7 @@ class FireflyApi:
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
         }
-        self.api_url = f"{api_hostname}/api/v1/"
+        self.api_url = f"{api_hostname.rstrip('/')}/api/v1/"
 
     def __build_uri(self, endpoint: str):
         return f"{self.api_url}{endpoint}"
