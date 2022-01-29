@@ -80,7 +80,7 @@ Enter your Crédit Agricole password: 123456
 [25.27s] Updating Firefly-III database
 ```
 
-## List the transactions on your Firefly account
+## List the transactions on your Firefly instance
 
 Once the package has been correctly installed, you should have access to an executable named `firefly_list_transactions`.
 This script lists all the transactions on the given Firefly instance that match the given filters. It can help viewing the transactions that have not been categorised or tagged yet in order to improve the rules.
@@ -97,6 +97,25 @@ optional arguments:
   -h, --help        show this help message and exit
   --no-tag          Only list transactions that do not have any tag.
   --no-category     Only list transactions that do not have any category.
+```
+
+## Update the transactions on your Firefly instance
+
+The executable `firefly_update_transaction_ca` recovers all the transactions from the Firefly instance, make them go through the rules once, and update the ones that changed (due to new rules for example).
+
+```
+$ firefly_update_transaction_ca --help
+usage: Update all transactions on the Firefly account. [-h] [-r RULES]
+                                                       firefly_instance
+
+positional arguments:
+  firefly_instance      URL of the Firefly III instance to update.
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -r RULES, --rules RULES
+                        Path to a file containing rules to classify
+                        transactions.
 ```
 
 # Rules
